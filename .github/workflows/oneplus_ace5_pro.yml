@@ -105,7 +105,7 @@ jobs:
 
           # Initialize and sync kernel source
           echo "Initializing and syncing kernel source..."
-          $REPO init -u https://github.com/Ra2-IFV/oplus_kernel_manifest.git -b refs/heads/oneplus/sm8750 -m JiuGeFaCai_oneplus_ace5_pro_v.xml --depth=1 --no-clone-bundle --no-tags
+          $REPO init -u https://github.com/HanKuCha/kernel_manifest.git -b refs/heads/oneplus/sm8750 -m JiuGeFaCai_oneplus_ace5_pro_v.xml --depth=1 --no-clone-bundle --no-tags
 
           # Sync repo and apply patches
           $REPO --version
@@ -277,7 +277,7 @@ jobs:
           export KBUILD_BUILD_TIMESTAMP="${{ github.event.inputs.KERNEL_TIME }}"
           cd $CONFIG
           export \
-            PATH="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r547379/bin:$PATH" \
+            PATH="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH" \
             PAHOLE="$PWD/prebuilts/kernel-build-tools/linux-x86/bin/pahole"
             RUSTC="$PWD/prebuilts/rust/linux-x86/1.83.0/bin/rustc"
           make -C kernel_platform/common -j$(nproc --all) \
