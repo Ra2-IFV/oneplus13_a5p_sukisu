@@ -81,13 +81,6 @@ jobs:
           chmod a+rx ./git-repo/repo
           echo "REPO=$GITHUB_WORKSPACE/./git-repo/repo" >> $GITHUB_ENV
 
-      - name: Clone AnyKernel3
-        run: |
-         git clone https://github.com/Kernel-SU/AnyKernel3.git --depth=1      
-         rm -rf \
-           ./AnyKernel3/.git \
-           ./AnyKernel3/push.sh
-
       - name: Restore ccache
         uses: actions/cache@v4
         with:
@@ -260,7 +253,7 @@ jobs:
       - name: Add optimizations
         run: |
           cd $CONFIG
-          sed 's/KBUILD_CFLAGS += -O2/KBUILD_CFLAGS += -O3 -mcpu=oryon-1/g' Makefile
+          sed 's/KBUILD_CFLAGS += -O2/KBUILD_CFLAGS += -O3/g' Makefile
 
           cd kernel_platform
           echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -291,7 +284,6 @@ jobs:
             LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld HOSTLD=ld.lld O=out \
             gki_defconfig all
          
-          cp kernel_platform/common/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/AnyKernel3/
           
       - name: Apply SukiSU Linux KPM Patch
         if: ${{ inputs.enable_kpm }}
@@ -303,6 +295,14 @@ jobs:
           rm -f Image
           mv oImage Image
           cp $GITHUB_WORKSPACE/$CONFIG/kernel_platform/common/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/AnyKernel3/
+
+      - name: Clone AnyKernel3
+        run: |
+         git clone https://github.com/Kernel-SU/AnyKernel3.git --depth=1      
+         rm -rf \
+           ./AnyKernel3/.git \
+           ./AnyKernel3/push.sh
+         cp $CONFIG/kernel_platform/common/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/AnyKernel3/
 
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v4
