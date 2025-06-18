@@ -74,7 +74,7 @@ jobs:
         run: |
           # Install dependencies
           sudo apt update
-          sudo apt install -y python3 python-is-python3 libelf-dev
+          sudo apt install -y python3 python-is-python3 ccache libelf-dev
 
           mkdir -p ./git-repo
           curl -sSL https://storage.googleapis.com/git-repo-downloads/repo > ./git-repo/repo
@@ -84,7 +84,7 @@ jobs:
       - name: Restore ccache
         uses: actions/cache@v4
         with:
-          path: /home/runner/.ccache
+          path: ~/.ccache
           key: ccache-${{ runner.os }}-${{ github.ref }}
           restore-keys: |
             ccache-${{ runner.os }}-
@@ -113,9 +113,6 @@ jobs:
           rm $CONFIG/common/android/abi_gki_protected_exports_* || echo "No protected exports!"
           rm $CONFIG/msm-kernel/android/abi_gki_protected_exports_* || echo "No protected exports!"
 
-          ls $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r547379/bin || true
-          find -type d $CONFIG clang || true
-
         # - name: Add KernelSU Next
         # run: |
         #   echo "Changing to configuration directory: $CONFIG..."
@@ -130,6 +127,13 @@ jobs:
         #   fi
         #
         #   git submodule update --init --recursive
+
+      - name: Clone AnyKernel3
+        run: |
+         git clone https://github.com/Kernel-SU/AnyKernel3.git --depth=1      
+         rm -rf \
+           ./AnyKernel3/.git \
+           ./AnyKernel3/push.sh
 
       - name: Set up SukiSU
         run: |
@@ -169,12 +173,16 @@ jobs:
       
       - name: Apply HMBird GKI patch
         run: |
-          cd $CONFIG
-          curl --compressed -L -o kernel_platform/common/drivers/hmbird_patch.c \
-          https://github.com/Ra2-IFV/oneplus13_a5p_sukisu/raw/refs/heads/feat_custom/hmbird_patch.c
-          if ! [ $(grep -q "hmbird_patch.o" Makefile) ]; then
-            echo "obj-y += hmbird_patch.o" >> Makefile
+          cd $CONFIG/kernel_platform/common/drivers
+          curl --compressed -L -o hmbird_patch.c \
+            https://github.com/Ra2-IFV/oneplus13_a5p_sukisu/raw/refs/heads/feat_custom/hmbird_patch.c
+          if ! grep -q "hmbird_patch.o" Makefile; then
+          echo "obj-y += hmbird_patch.o" >> Makefile
           fi
+
+          # if ! [ $(grep -q "hmbird_patch.o" Makefile) ]; then
+          #   echo "obj-y += hmbird_patch.o" >> Makefile
+          # fi
  
       - name: Apply lz4kd Patches
         if: ${{ inputs.enable_lz4kd }}
@@ -252,25 +260,22 @@ jobs:
 
       - name: Add optimizations
         run: |
-          cd $CONFIG
-          sed 's/KBUILD_CFLAGS += -O2/KBUILD_CFLAGS += -O3/g' Makefile
+          cd $CONFIG/kernel_platform
+          # sed 's/KBUILD_CFLAGS += -O2/KBUILD_CFLAGS += -O3/g' common/Makefile
+          # sed 's/KBUILD_RUSTFLAGS += -Copt-level=2/KBUILD_RUSTFLAGS += -Copt-level=3/g' common/Makefile
+          # echo 'KBUILD_CFLAGS := $(filter-out -march=%,$(KBUILD_CFLAGS)) -mtune=armv8.5-a' >> common/arch/arm64/Makefile
 
-          cd kernel_platform
           echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_LTO=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_LTO_CLANG_THIN=y" >> ./common/arch/arm64/configs/gki_defconfig
+          $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r510928/bin/clang -mcpu=help
+          $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r510928/bin/clang -mtune=help
 
       - name: Add make name
         run: |
          cd $CONFIG/kernel_platform
          sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
          sudo sed -i 's/-4k/${{ github.event.inputs.KERNEL_SUFFIX }}/g' ./common/arch/arm64/configs/gki_defconfig
-
-      - name: Cat config
-        run: |
-          cd $CONFIG/kernel_platform
-          echo 'Printing config'
-          cat ./common/arch/arm64/configs/gki_defconfig
 
       - name: Build Kernel
         run: |
@@ -279,12 +284,12 @@ jobs:
           export \
             PATH="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH" \
             PAHOLE="$PWD/prebuilts/kernel-build-tools/linux-x86/bin/pahole"
-            RUSTC="$PWD/prebuilts/rust/linux-x86/1.83.0/bin/rustc"
+            RUSTC="$PWD/prebuilts/rust/linux-x86/1.73.0b/bin/rustc"
           make -C kernel_platform/common -j$(nproc --all) \
             LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld HOSTLD=ld.lld O=out \
             gki_defconfig all
-         
-          
+          cp $GITHUB_WORKSPACE/$CONFIG/kernel_platform/common/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/AnyKernel3/Image  
+
       - name: Apply SukiSU Linux KPM Patch
         if: ${{ inputs.enable_kpm }}
         run: |
@@ -292,17 +297,7 @@ jobs:
           curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.12.0/patch_linux
           chmod +x patch_linux
           ./patch_linux
-          rm -f Image
-          mv oImage Image
-          cp $GITHUB_WORKSPACE/$CONFIG/kernel_platform/common/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/AnyKernel3/
-
-      - name: Clone AnyKernel3
-        run: |
-         git clone https://github.com/Kernel-SU/AnyKernel3.git --depth=1      
-         rm -rf \
-           ./AnyKernel3/.git \
-           ./AnyKernel3/push.sh
-         cp $CONFIG/kernel_platform/common/out/arch/arm64/boot/Image $GITHUB_WORKSPACE/AnyKernel3/
+          cp $GITHUB_WORKSPACE/$CONFIG/kernel_platform/common/out/arch/arm64/boot/oImage $GITHUB_WORKSPACE/AnyKernel3/Image
 
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v4
