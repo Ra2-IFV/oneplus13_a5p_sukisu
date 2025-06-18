@@ -74,7 +74,7 @@ jobs:
         run: |
           # Install dependencies
           sudo apt update
-          sudo apt install -y python3 python-is-python3 libelf-dev
+          sudo apt install -y python3 python-is-python3 ccache libelf-dev
 
           mkdir -p ./git-repo
           curl -sSL https://storage.googleapis.com/git-repo-downloads/repo > ./git-repo/repo
@@ -84,7 +84,7 @@ jobs:
       - name: Restore ccache
         uses: actions/cache@v4
         with:
-          path: /home/runner/.ccache
+          path: ~/.ccache
           key: ccache-${{ runner.os }}-${{ github.ref }}
           restore-keys: |
             ccache-${{ runner.os }}-
@@ -112,9 +112,6 @@ jobs:
           $REPO --trace sync -c --no-clone-bundle --no-tags --optimized-fetch -j$(nproc --all) --fail-fast
           rm $CONFIG/common/android/abi_gki_protected_exports_* || echo "No protected exports!"
           rm $CONFIG/msm-kernel/android/abi_gki_protected_exports_* || echo "No protected exports!"
-
-          ls $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r547379/bin || true
-          find -type d $CONFIG clang || true
 
         # - name: Add KernelSU Next
         # run: |
@@ -169,9 +166,9 @@ jobs:
       
       - name: Apply HMBird GKI patch
         run: |
-          cd $CONFIG
-          curl --compressed -L -o kernel_platform/common/drivers/hmbird_patch.c \
-          https://github.com/Ra2-IFV/oneplus13_a5p_sukisu/raw/refs/heads/feat_custom/hmbird_patch.c
+          cd $CONFIG/kernel_platform/common/drivers
+          curl --compressed -L -o hmbird_patch.c \
+            https://github.com/Ra2-IFV/oneplus13_a5p_sukisu/raw/refs/heads/feat_custom/hmbird_patch.c
           if ! [ $(grep -q "hmbird_patch.o" Makefile) ]; then
             echo "obj-y += hmbird_patch.o" >> Makefile
           fi
@@ -253,7 +250,7 @@ jobs:
       - name: Add optimizations
         run: |
           cd $CONFIG
-          sed 's/KBUILD_CFLAGS += -O2/KBUILD_CFLAGS += -O3/g' Makefile
+          sed 's/KBUILD_CFLAGS += -O2/KBUILD_CFLAGS += -O3/g' kernel/Makefile
 
           cd kernel_platform
           echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> ./common/arch/arm64/configs/gki_defconfig
