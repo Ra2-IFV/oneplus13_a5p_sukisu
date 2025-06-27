@@ -5,97 +5,134 @@ on:
       KERNEL_SUFFIX:
         description: '内核名称修改(可改中文和emoji)'
         required: true
-        default: '-酷安FutabaWa'
+        default: '-none'
       KERNEL_TIME:
        description: "内核构建日期更改(默认为原厂)"
        required: true
        default: 'Wed Dec 4 02:11:46 UTC 2024'
-      enable_feature_x:
+      enable_kpm:
        description: "是否启用kpm"
        required: false
        default: false
        type: boolean
-      enable_feature_y:
+      enable_lz4kd:
        description: "是否启用lz4kd"
        required: false
        default: false
        type: boolean
-      enable_feature_z:
+      enable_fengchi:
        description: "是否添加风驰驱动"
        required: false
        default: false
        type: boolean
       
-       
-
-
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
-      CCACHE_NOHASHDIR: "true"
-      CCACHE_HARDLINK: "true"
+      CCACHE_COMPILERCHECK: '%compiler% -dumpmachine; %compiler% -dumpversion'
+      CCACHE_NOHASHDIR: true
+      CCACHE_HARDLINK: true
       CCACHE_DIR: /home/runner/.ccache  
       CCACHE_MAXSIZE: 8G
+      CONFIG: 'OPAce5Pro'
     steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 8192
-          temp-reserve-mb: 2048
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
+      - name: Setup System
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          echo "DEBIAN_FRONTEND=noninteractive" >> $GITHUB_ENV
           
-      - name: Configure Git
-        run: |
-         git config --global user.name "Futaba"
-         git config --global user.email "3199167602@qq.com"
+          df -h
+          
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift || true
+          sudo docker image prune --all --force
+          echo "some directories deleted"
+          
+          # Remove large unwanted packages
+          sudo apt-get purge -y \
+            aria2 ansible azure-cli shellcheck rpm xorriso zsync \
+            esl-erlang firefox gfortran-8 gfortran-9 google-chrome-stable \
+            google-cloud-sdk imagemagick \
+            libmagickcore-dev libmagickwand-dev libmagic-dev ant ant-optional kubectl \
+            mercurial apt-transport-https mono-complete libmysqlclient \
+            unixodbc-dev yarn chrpath libssl-dev libxft-dev \
+            libfreetype6 libfreetype6-dev libfontconfig1 libfontconfig1-dev \
+            snmp pollinate libpq-dev postgresql-client powershell ruby-full \
+            sphinxsearch subversion mongodb-org microsoft-edge-stable || true
+          
+          # Regex-based purges (for bulk families like mysql, php, dotnet)
+          sudo apt-get purge -y $(dpkg-query -W -f='${binary:Package}\n' | grep -E '^mysql|^php|^dotnet') || true
+          
+          # Clean up
+          sudo apt-get autoremove -y
+          sudo apt-get autoclean -y
+          echo "some packages purged"
+          
+          df -h
 
-      - name: Install dependencies
+      - name: Install Repo and Python
         run: |
-          sudo apt update && sudo apt upgrade -y
-          sudo apt install -y python3 git curl
-          sudo apt install -y python3 git curl ccache
+          # Install dependencies
+          sudo apt update
+          sudo apt install -y python3 python-is-python3 ccache libelf-dev
+
+          mkdir -p ./git-repo
+          curl -sSL https://storage.googleapis.com/git-repo-downloads/repo > ./git-repo/repo
+          chmod a+rx ./git-repo/repo
+          echo "REPO=$GITHUB_WORKSPACE/./git-repo/repo" >> $GITHUB_ENV
 
       - name: Restore ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
-          path: /home/runner/.ccache
+          path: ~/.ccache
           key: ccache-${{ runner.os }}-${{ github.ref }}
           restore-keys: |
             ccache-${{ runner.os }}-
 
-      - name: Install repo tool
+      - name: Restore repo cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.GITHUB_WORKSPACE }}/${{ env.CONFIG }}
+          key: repo-${{ runner.os }}-${{ github.ref }}
+          restore-keys: |
+            repo-${{ runner.os }}-
+          
+      - name: Initialize and Sync Kernel Source
         run: |
-         curl https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
-         chmod a+x ~/repo
-         sudo mv ~/repo /usr/local/bin/repo
+          echo "Creating folder for configuration: $CONFIG..."
+          mkdir -p "$CONFIG"
+          cd "$CONFIG"
 
-      - name: Initialize repo and sync
+          # Initialize and sync kernel source
+          echo "Initializing and syncing kernel source..."
+          $REPO init -u https://github.com/HanKuCha/kernel_manifest.git -b refs/heads/oneplus/sm8750 -m JiuGeFaCai_oneplus_ace5_pro_v.xml --depth=1 --no-clone-bundle --no-tags
+
+          # Sync repo and apply patches
+          $REPO --version
+          $REPO --trace sync -c --no-clone-bundle --no-tags --optimized-fetch -j$(nproc --all) --fail-fast
+          rm $CONFIG/common/android/abi_gki_protected_exports_* || echo "No protected exports!"
+          rm $CONFIG/msm-kernel/android/abi_gki_protected_exports_* || echo "No protected exports!"
+
+      - name: Clone AnyKernel3
         run: |
-         mkdir kernel_workspace && cd kernel_workspace
-         repo init -u https://github.com/HanKuCha/kernel_manifest.git -b refs/heads/oneplus/sm8750 -m JiuGeFaCai_oneplus_ace5_pro_v.xml --depth=1
-         repo --trace sync -c -j$(nproc --all) --no-tags
-         rm kernel_platform/common/android/abi_gki_protected_exports_* || echo "No protected exports!"
-         rm kernel_platform/msm-kernel/android/abi_gki_protected_exports_* || echo "No protected exports!"
+         git clone https://github.com/Kernel-SU/AnyKernel3.git --depth=1      
+         rm -rf \
+           ./AnyKernel3/.git \
+           ./AnyKernel3/push.sh
          
       - name: Set up SukiSU
         run: |
-         cd kernel_workspace/kernel_platform
+         cd $CONFIG/kernel_platform
          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
          cd ./KernelSU
          KSU_VERSION=$(expr $(/usr/bin/git rev-list --count main) "+" 10606)
          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
          export KSU_VERSION=$KSU_VERSION
          sed -i "s/DKSU_VERSION=12800/DKSU_VERSION=${KSU_VERSION}/" kernel/Makefile
-      
-        
+
       - name: Set up susfs
         run: |
-           cd kernel_workspace
+           cd $CONFIG
            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android15-6.6
            git clone https://github.com/SukiSU-Ultra/SukiSU_patch.git
 
@@ -121,96 +158,30 @@ jobs:
       
       - name: Apply HMBird GKI patch
         run: |
-         cd kernel_workspace/kernel_platform/common/drivers
-         cat << 'EOF' > hmbird_patch.c
-         #include <linux/init.h>
-         #include <linux/module.h>
-         #include <linux/of.h>
-         #include <linux/slab.h>
-         #include <linux/string.h>
-
-         static int __init hmbird_patch_init(void)
-         {
-             struct device_node *ver_np;
-             const char *type;
-             int ret;
-
-             ver_np = of_find_node_by_path("/soc/oplus,hmbird/version_type");
-             if (!ver_np) {
-                  pr_info("hmbird_patch: version_type node not found\n");
-                  return 0;
-             }
-
-             ret = of_property_read_string(ver_np, "type", &type);
-             if (ret) {
-                  pr_info("hmbird_patch: type property not found\n");
-                  of_node_put(ver_np);
-                  return 0;
-             }
-
-             if (strcmp(type, "HMBIRD_OGKI")) {
-                  of_node_put(ver_np);
-                  return 0;
-             }
-
-             struct property *prop = of_find_property(ver_np, "type", NULL);
-             if (prop) {
-                  struct property *new_prop = kmalloc(sizeof(*prop), GFP_KERNEL);
-                  if (!new_prop) {
-                       pr_info("hmbird_patch: kmalloc for new_prop failed\n");
-                       of_node_put(ver_np);
-                       return 0;
-             }
-             memcpy(new_prop, prop, sizeof(*prop));
-             new_prop->value = kmalloc(strlen("HMBIRD_GKI") + 1, GFP_KERNEL);
-             if (!new_prop->value) {
-                  pr_info("hmbird_patch: kmalloc for new_prop->value failed\n");
-                  kfree(new_prop);
-                  of_node_put(ver_np);
-                  return 0;
-            }
-            strcpy(new_prop->value, "HMBIRD_GKI");
-            new_prop->length = strlen("HMBIRD_GKI") + 1;
-
-            if (of_remove_property(ver_np, prop) != 0) {
-                 pr_info("hmbird_patch: of_remove_property failed\n");
-                 return 0;
-            }
-            if (of_add_property(ver_np, new_prop) !=0) {
-                 pr_info("hmbird_patch: of_add_property failed\n");
-                 return 0;
-            }
-            pr_info("hmbird_patch: success from HMBIRD_OGKI to HMBIRD_GKI\n");
-         }
-         else {
-             pr_info("hmbird_patch: type property structure not found\n");
-         }
-         of_node_put(ver_np);
-         return 0;
-         }
-         early_initcall(hmbird_patch_init);
-         MODULE_LICENSE("GPL");
-         MODULE_AUTHOR("reigadegr");
-         MODULE_DESCRIPTION("Forcefully convert HMBIRD_OGKI to HMBIRD_GKI.");
-         EOF
-         if ! grep -q "hmbird_patch.o" Makefile; then
-         echo "obj-y += hmbird_patch.o" >> Makefile
-         fi
-         cd ../../../
-         git add -A
-         git commit -m "Add HMBird GKI patch" || true
-
+          cd $CONFIG/kernel_platform/common/drivers
+          curl --compressed -L -o hmbird_patch.c \
+            https://github.com/Ra2-IFV/oneplus13_a5p_sukisu/raw/refs/heads/feat_custom/hmbird_patch.c
+          if ! [ $(grep -q "hmbird_patch.o" Makefile) ]; then
+            echo 'Its true'
+            echo "obj-y += hmbird_patch.o" >> Makefile
+          fi
  
       - name: Apply lz4kd Patches
-        if: ${{inputs.enable_feature_y }}
+        if: ${{ inputs.enable_lz4kd }}
         run: |
-          cd kernel_workspace/kernel_platform/common
-            cp ../../SukiSU_patch/other/zram/zram_patch/6.6/lz4kd.patch ./
-            patch -p1 -F 3 < lz4kd.patch || true
+          cd $CONFIG/kernel_platform/common
+          cp ../../SukiSU_patch/other/zram/zram_patch/6.6/lz4kd.patch ./
+          patch -p1 -F 3 < lz4kd.patch || true
+
+          cd $CONFIG/kernel_platform
+          echo "CONFIG_CRYPTO_LZ4HC=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRYPTO_LZ4K=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRYPTO_LZ4KD=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRYPTO_842=y" >> ./common/arch/arm64/configs/gki_defconfig
            
       - name: Add SUSFS Configuration Settings
         run: |
-          cd kernel_workspace/kernel_platform
+          cd $CONFIG/kernel_platform
           echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
 
           # Add VFS configuration settings
@@ -234,70 +205,82 @@ jobs:
           echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
           
-          echo "CONFIG_CRYPTO_LZ4HC=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_CRYPTO_LZ4K=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_CRYPTO_LZ4KD=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_CRYPTO_842=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
           
           #Remove check_defconfig
           sudo sed -i 's/check_defconfig//' ./common/build.config.gki
-          cd common
-          git add -A && git commit -a -m "BUILD Kernel"
       
       - name: Add KPM Configuration Settings
-        if: ${{inputs.enable_feature_x }}
+        if: ${{ inputs.enable_kpm }}
         run: |
-          cd kernel_workspace/kernel_platform
+          cd $CONFIG/kernel_platform
           echo "CONFIG_KPM=y" >> ./common/arch/arm64/configs/gki_defconfig
          
           #Remove check_defconfig
           sudo sed -i 's/check_defconfig//' ./common/build.config.gki
-          cd common
-          git add -A && git commit -a -m "BUILD Kernel"
           
-      - name: Add make name
-        run: |
-         cd kernel_workspace/kernel_platform
-         sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
-         sudo sed -i 's/-4k/${{ github.event.inputs.KERNEL_SUFFIX }}/g' ./common/arch/arm64/configs/gki_defconfig
-        
       - name: Add sched_ext
-        if: ${{inputs.enable_feature_z }}
+        if: ${{ inputs.enable_fengchi }}
         run: |
-         cd kernel_workspace/kernel_platform/
-         git clone https://github.com/HanKuCha/sched_ext.git
-         cp -r ./sched_ext/* ./common/kernel/sched
-         rm -rf ./sched_ext/.git
-         cd common/kernel/sched  
+          cd $CONFIG/kernel_platform/
+          git clone --depth=1 https://github.com/HanKuCha/sched_ext.git
+          cp -r ./sched_ext/* ./common/kernel/sched
+          rm -rf ./sched_ext/.git
+          cd common/kernel/sched  
+
+      - name: Add BBR Support
+        run: |
+          cd $CONFIG/kernel_platform
+          
+          echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
+          
+          echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
+
+          echo "CONFIG_DEFAULT_TCP_CONG=bbr" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_DEFAULT_NET_SCH="fq"" >> ./common/arch/arm64/configs/gki_defconfig
+
+      - name: Add optimizations
+        run: |
+          cd $CONFIG/kernel_platform
+          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_LTO=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_LTO_CLANG_THIN=y" >> ./common/arch/arm64/configs/gki_defconfig
+
+      - name: Cat config
+        run: |
+          cd $CONFIG/kernel_platform
+          echo 'Printing config'
+          cat ./common/arch/arm64/configs/gki_defconfig
+          echo 'Printing -mcpu=help, -mtune=help'
+          $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r510928/bin/clang -mcpu=help
+          $GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r510928/bin/clang -mtune=help
 
       - name: Build Kernel
         run: |
           export KBUILD_BUILD_TIMESTAMP="${{ github.event.inputs.KERNEL_TIME }}"
-          export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/$CONFIG/kernel_platform/prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH"
           export PATH="/usr/lib/ccache:$PATH"
           sudo apt install libelf-dev
-          cd kernel_workspace/kernel_platform/common
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld  HOSTLD=ld.lld O=out KCFLAGS+=-O2 gki_defconfig all
+          cd $CONFIG/kernel_platform/common
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld  HOSTLD=ld.lld O=out gki_defconfig all
           
       - name: Apply Linux Patch
+        if: ${{ inputs.enable_kpm }}
         run: |
-         cd kernel_workspace/kernel_platform/common/out/arch/arm64/boot
-         curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.12.0/patch_linux
-         chmod +x patch_linux
-         ./patch_linux
-         rm -f Image
-         mv oImage Image
+          cd $CONFIG/kernel_platform/common/out/arch/arm64/boot
+          curl -LO https://github.com/ShirkNeko/SukiSU_KernelPatch_patch/releases/download/0.11-beta/patch_linux
+          chmod +x patch_linux
+          ./patch_linux
+          rm -f Image
+          mv oImage Image
          
       - name: Make AnyKernel3
         run: |
-         git clone https://github.com/Kernel-SU/AnyKernel3.git --depth=1      
-         rm -rf ./AnyKernel3/.git
-         rm -rf ./AnyKernel3/push.sh
-         cp kernel_workspace/kernel_platform/common/out/arch/arm64/boot/Image ./AnyKernel3/
+          cp $CONFIG/kernel_platform/common/out/arch/arm64/boot/Image ./AnyKernel3/
 
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v4
         with:
-         name: SuKiSu_${{ env.KSUVER }}_oneplus_ace5_pro
-         path: ./AnyKernel3/*
+          name: SuKiSu_${{ env.KSUVER }}_oneplus_ace5_pro
+          path: ./AnyKernel3/*
